@@ -43,18 +43,24 @@ export function activate(context: vscode.ExtensionContext) {
 			)) || [];
 
 			// Map to a serializable structure for webview
-			const defsSerializable = defs.map(loc => ({
-				uri: loc.uri.toString(),
-				fsPath: loc.uri.fsPath,
-				line: loc.range.start.line,
-				character: loc.range.start.character
-			}));
-			const refsSerializable = refs.map(loc => ({
-				uri: loc.uri.toString(),
-				fsPath: loc.uri.fsPath,
-				line: loc.range.start.line,
-				character: loc.range.start.character
-			}));
+			const defsSerializable = defs
+				.filter(loc => !!loc && !!(loc as any).uri)
+				.map(loc => ({
+					uri: loc.uri.toString(),
+					fsPath: loc.uri.fsPath,
+					line: loc.range.start.line,
+					character: loc.range.start.character
+				}));
+
+			const refsSerializable = refs
+				.filter(loc => !!loc && !!(loc as any).uri)
+				.map(loc => ({
+					uri: loc.uri.toString(),
+					fsPath: loc.uri.fsPath,
+					line: loc.range.start.line,
+					character: loc.range.start.character
+				}));
+
 
 			// Create webview panel
 			const panel = vscode.window.createWebviewPanel(
@@ -171,6 +177,7 @@ export function activate(context: vscode.ExtensionContext) {
 		context.subscriptions.push(analyzeCmd, applySandboxCmd, discardSandboxCmd);
 	} catch (e) {
 		console.error("ACTIVATE FAILED", e);
+		//   vscode.window.showErrorMessage(String(e));
 
 	}
 

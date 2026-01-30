@@ -37,6 +37,9 @@ async function main() {
 		outfile: 'dist/extension.js',
 		external: ['vscode'],
 		logLevel: 'silent',
+		banner: {
+			js: '// Extension entry point'
+		},
 		plugins: [
 			/* add to the end of plugins array */
 			esbuildProblemMatcherPlugin,

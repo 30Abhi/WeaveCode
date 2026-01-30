@@ -11,9 +11,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:debug-slicer.analyze",
-    "onCommand:debug-slicer.applySandbox",
-    "onCommand:debug-slicer.discardSandbox"
+    "*"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -34,7 +32,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "compile": "npm run check-types && npm run lint && node esbuild.js && node fix-exports.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
