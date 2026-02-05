@@ -27,6 +27,10 @@
       {
         "command": "debug-slicer.discardSandbox",
         "title": "Debug Slicer: Discard Sandbox"
+      },
+      {
+        "command": "debug-slicer.toggleLiveSync",
+        "title": "Debug Slicer: Live Sync/Change"
       }
     ]
   },
