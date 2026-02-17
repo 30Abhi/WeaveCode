@@ -28,6 +28,27 @@ type SandboxMapping = {
 
 const sandboxMap = new Map<string, SandboxMapping>();
 
+/**
+ * Recursively searches through document symbols to find the smallest symbol 
+ * (function, class, etc.) that completely contains the target line.
+ */
+function findSymbolAtLine(symbols: vscode.DocumentSymbol[], targetLine: number): vscode.DocumentSymbol | undefined {
+	for (const symbol of symbols) {
+		// Check if the target line falls inside this symbol's range
+		if (symbol.range.start.line <= targetLine && symbol.range.end.line >= targetLine) {
+			// Check if there's a smaller child symbol inside this one that also matches
+			if (symbol.children && symbol.children.length > 0) {
+				const childMatch = findSymbolAtLine(symbol.children, targetLine);
+				if (childMatch) {
+					return childMatch; // Return the more specific inner symbol
+				}
+			}
+			return symbol; // If no children match, return this symbol
+		}
+	}
+	return undefined;
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	// Register Analyze command (existing functionality)
 	const analyzeCmd = vscode.commands.registerCommand('debug-slicer.analyze', async () => {
@@ -94,15 +115,41 @@ export function activate(context: vscode.ExtensionContext) {
 					ed.selection = new vscode.Selection(pos, pos);
 					ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 				} else if (msg.command === 'openInSandbox') {
-					// We will:
+
 					// 1) prepare snippet and originalContent backup
 					// 2) open untitled doc with snippet
 					// 3) store mapping keyed by untitledDoc.uri
 					const targetUri = vscode.Uri.parse(msg.uri);
 					const origDoc = await vscode.workspace.openTextDocument(targetUri);
 					const targetLine = Math.max(0, (msg.line || 0));
-					const startLine = Math.max(0, targetLine - 6);
-					const endLine = Math.min(origDoc.lineCount - 1, targetLine + 30); // reasonable window
+					let startLine = targetLine;
+					let endLine = targetLine;
+
+						// 1. Ask VS Code for the structure of the document
+					const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+						'vscode.executeDocumentSymbolProvider',
+						targetUri
+					);
+
+					if (symbols && symbols.length > 0) {
+						// 2. Find the specific function/class the user clicked on
+						// console.log("Symbols-> ",symbols)
+						const matchingSymbol = findSymbolAtLine(symbols, targetLine);
+
+						if (matchingSymbol) {
+							startLine = matchingSymbol.range.start.line;
+							endLine = matchingSymbol.range.end.line;
+						} else {
+							// Fallback if no symbol is found (e.g., plain text)
+							startLine = Math.max(0, targetLine - 10);
+							endLine = Math.min(origDoc.lineCount - 1, targetLine + 10);
+						}
+					} else {
+						// Fallback if the language doesn't support symbols
+						startLine = Math.max(0, targetLine - 10);
+						endLine = Math.min(origDoc.lineCount - 1, targetLine + 10);
+					}
+
 
 					const snippetLines: string[] = [];
 					for (let i = startLine; i <= endLine; i++) {
@@ -265,35 +312,35 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Watch for sandbox document changes and apply to original if live sync is enabled
 	// Watch for sandbox document changes and apply to original if live sync is enabled
-const changeListener = vscode.workspace.onDidChangeTextDocument(async (e) => {
-  const doc = e.document;
-  const docKey = doc.uri.toString();
+	const changeListener = vscode.workspace.onDidChangeTextDocument(async (e) => {
+		const doc = e.document;
+		const docKey = doc.uri.toString();
 
-  // Strict guard: only respond to untitled sandbox documents (prevents accidental triggers)
-  // If you ever use a different scheme for sandboxes (e.g. 'file' with temp files), adjust this check.
-  if (doc.isUntitled !== true) {
-    // Not an untitled sandbox document: ignore
-    return;
-  }
+		// Strict guard: only respond to untitled sandbox documents (prevents accidental triggers)
+		// If you ever use a different scheme for sandboxes (e.g. 'file' with temp files), adjust this check.
+		if (doc.isUntitled !== true) {
+			// Not an untitled sandbox document: ignore
+			return;
+		}
 
-  const mapping = sandboxMap.get(docKey);
-  if (!mapping) return;             // no mapping for this untitled doc (not our sandbox)
-  if (!mapping.isLive) return;      // live sync not enabled, do nothing
+		const mapping = sandboxMap.get(docKey);
+		if (!mapping) return;             // no mapping for this untitled doc (not our sandbox)
+		if (!mapping.isLive) return;      // live sync not enabled, do nothing
 
-  // Debounce updates to avoid too many writes
-  if (mapping.debounce) clearTimeout(mapping.debounce);
-  mapping.debounce = setTimeout(async () => {
-    if (mapping.mutex) return; // avoid overlapping syncs
-    mapping.mutex = true;
-    try {
-      await applySandboxToOriginal(mapping, doc);
-    } catch (err) {
-      console.error('Live sync error:', err);
-    } finally {
-      mapping.mutex = false;
-    }
-  }, 250);
-});
+		// Debounce updates to avoid too many writes
+		if (mapping.debounce) clearTimeout(mapping.debounce);
+		mapping.debounce = setTimeout(async () => {
+			if (mapping.mutex) return; // avoid overlapping syncs
+			mapping.mutex = true;
+			try {
+				await applySandboxToOriginal(mapping, doc);
+			} catch (err) {
+				console.error('Live sync error:', err);
+			} finally {
+				mapping.mutex = false;
+			}
+		}, 250);
+	});
 
 	// Optional: cleanup or notify on close (we keep mapping so user can apply/discard later)
 	const closeListener = vscode.workspace.onDidCloseTextDocument((doc) => {
