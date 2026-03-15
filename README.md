@@ -57,7 +57,7 @@ Debug Slicer leverages VS Code's native Language Server Protocol (LSP) to unders
 
  `debug-slicer.applySandbox` - Keeps all synced changes and cleans up the sandbox session. 
 
- 
+
  `debug-slicer.discardSandbox` - Reverts all affected regions in the original file and closes the sandbox. 
 
 *Tip: We highly recommend binding `debug-slicer.toggleLiveSync` to a keyboard shortcut like `Ctrl+Alt+S` in your VS Code settings for rapid toggling!*
@@ -87,6 +87,4 @@ If a language does not provide exact symbol boundaries, Debug Slicer gracefully 
 
 * **Do not delete the `✂️ --- DEBUG SLICE --- ✂️` separators** in the sandbox file. The extension relies on these to map your edits back to the correct locations in the original file. If you accidentally delete one, simply use `Undo` (`Ctrl+Z`) to restore it.
 
----
 
-### Would you like me to help you format the `package.json` file so these commands and their titles show up cleanly in the VS Code Command Palette?
