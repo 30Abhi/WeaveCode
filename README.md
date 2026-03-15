@@ -47,11 +47,17 @@ Debug Slicer leverages VS Code's native Language Server Protocol (LSP) to unders
 
 ## ⌨️ Commands
 
-| Command                                       Description |
+| Command                                   -    Description |
 
  `debug-slicer.analyze` - Analyzes the symbol under the cursor and opens  the Webview panel. 
+
+
  `debug-slicer.toggleLiveSync` - Toggles the background syncing of edits from the sandbox to the original file. 
+
+
  `debug-slicer.applySandbox` - Keeps all synced changes and cleans up the sandbox session. 
+
+ 
  `debug-slicer.discardSandbox` - Reverts all affected regions in the original file and closes the sandbox. 
 
 *Tip: We highly recommend binding `debug-slicer.toggleLiveSync` to a keyboard shortcut like `Ctrl+Alt+S` in your VS Code settings for rapid toggling!*
