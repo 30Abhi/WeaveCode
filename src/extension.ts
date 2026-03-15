@@ -20,7 +20,31 @@ type SandboxMapping = {
 };
 
 const sandboxMap = new Map<string, SandboxMapping>();
-const SEPARATOR_REGEX = /\/\* ✂️ --- DEBUG SLICE: (region_\d+) --- ✂️ \*\/\r?\n/g;
+function getSeparator(languageId: string, regionId: string): string {
+    const wrappers: { [key: string]: [string, string] } = {
+        'python': ['# ', ''],
+        'ruby': ['# ', ''],
+        'perl': ['# ', ''],
+        'lua': ['-- ', ''],
+        'sql': ['-- ', ''],
+        'html': ['<!-- ',' -->'], 
+        'xml': ['<!-- ',' -->'],
+        'css': ['/* ', ' */'],
+        'php': ['/* ', ' */'],
+        'rust': ['// ', ''],
+        'go': ['// ', ''],
+        'csharp': ['// ', ''],
+        'javascript': ['// ', ''],
+        'typescript': ['// ', ''],
+        'java': ['// ', '']
+    };
+
+    // Destructure the tuple (always returns 2 strings to satisfy the type requirement)
+    const [start, end] = wrappers[languageId] || ['/* ', ' */']; 
+    
+    // Combine them safely
+    return `${start}✂️ --- DEBUG SLICE: ${regionId} --- ✂️${end}`;
+}
 
 // -----------------------------------------------------------------------------
 // CORE ACTIVATION
@@ -208,7 +232,10 @@ async function openUnifiedSandbox(uriStr: string, targetLines: number[], context
 		const content = origDoc.getText().substring(startOffset, endOffset);
 
 		regions.push({ id, originalRange: { ...range }, originalContent: content });
-		sandboxText += `/* ✂️ --- DEBUG SLICE: ${id} --- ✂️ */\n${content}\n\n`;
+		
+		// Use the dynamic separator here
+		const separator = getSeparator(origDoc.languageId, id);
+		sandboxText += `${separator}\n${content}\n\n`;
 	});
 
 	// 5. Create Sandbox
@@ -222,61 +249,144 @@ async function openUnifiedSandbox(uriStr: string, targetLines: number[], context
 	vscode.window.showInformationMessage(`Sandbox created with ${regions.length} segments. Toggle Live Sync to begin editing.`);
 }
 
+// async function applySandboxSegmentsToOriginal(mapping: SandboxMapping, sandboxDoc: vscode.TextDocument) {
+// 	const sandboxText = sandboxDoc.getText();
+// 	const parts = sandboxText.split(SEPARATOR_REGEX);
+
+// 	// Parts array structure: [0: junk before first separator, 1: "region_0", 2: "code...", 3: "region_1", 4: "code..."]
+// 	const parsedCodeBlocks = new Map<string, string>();
+
+// 	for (let i = 1; i < parts.length; i += 2) {
+// 		const regionId = parts[i];
+// 		let code = parts[i + 1];
+// 		// Strip the trailing double newline we added during generation to prevent file bloat
+// 		code = code.replace(/\r?\n\r?\n$/, '');
+// 		parsedCodeBlocks.set(regionId, code);
+// 	}
+
+// 	// Guard: Ensure user didn't accidentally delete a separator
+// 	if (parsedCodeBlocks.size !== mapping.regions.length) {
+// 		vscode.window.showErrorMessage("Live Sync Error: A ✂️ separator was deleted. Undo your last action to restore it.");
+// 		return;
+// 	}
+
+// 	const originalUri = vscode.Uri.parse(mapping.originalUri);
+// 	const originalDoc = await vscode.workspace.openTextDocument(originalUri);
+// 	const edit = new vscode.WorkspaceEdit();
+
+// 	// Build the bulk edit using CURRENT ranges
+// 	for (const region of mapping.regions) {
+// 		const newCode = parsedCodeBlocks.get(region.id)!;
+// 		const endLine = Math.min(region.originalRange.endLine, originalDoc.lineCount - 1);
+// 		const replaceRange = new vscode.Range(region.originalRange.startLine, 0, endLine, originalDoc.lineAt(endLine).text.length);
+// 		edit.replace(originalUri, replaceRange, newCode);
+// 	}
+
+// 	const applied = await vscode.workspace.applyEdit(edit);
+// 	if (!applied) return;
+
+// 	await originalDoc.save();
+
+// 	// ---------------------------------------------------
+// 	// THE SHIFT CALCULUS: Update line numbers for NEXT time
+// 	// ---------------------------------------------------
+// 	let currentShift = 0;
+// 	for (const region of mapping.regions) {
+// 		const newCode = parsedCodeBlocks.get(region.id)!;
+// 		const newCodeLineCount = newCode.split(/\r?\n/).length;
+// 		const oldLineCount = (region.originalRange.endLine - region.originalRange.startLine) + 1;
+
+// 		// Apply any cumulative shifts from regions above this one
+// 		region.originalRange.startLine += currentShift;
+// 		region.originalRange.endLine = region.originalRange.startLine + newCodeLineCount - 1;
+
+// 		// Calculate the difference this specific region caused to pass down the chain
+// 		currentShift += (newCodeLineCount - oldLineCount);
+// 	}
+// }
+
+
 async function applySandboxSegmentsToOriginal(mapping: SandboxMapping, sandboxDoc: vscode.TextDocument) {
-	const sandboxText = sandboxDoc.getText();
-	const parts = sandboxText.split(SEPARATOR_REGEX);
+    const sandboxText = sandboxDoc.getText();
+    const parsedCodeBlocks = new Map<string, string>();
 
-	// Parts array structure: [0: junk before first separator, 1: "region_0", 2: "code...", 3: "region_1", 4: "code..."]
-	const parsedCodeBlocks = new Map<string, string>();
+    // 1. Identify all headers in the sandbox
+    // This regex only looks for your unique ID, ignoring the surrounding comment syntax
+    const headerRegex = /✂️ --- DEBUG SLICE: (region_\d+) --- ✂️/g;
+    
+    let match;
+    const headers: { id: string; startPos: number; endOfLinePos: number }[] = [];
 
-	for (let i = 1; i < parts.length; i += 2) {
-		const regionId = parts[i];
-		let code = parts[i + 1];
-		// Strip the trailing double newline we added during generation to prevent file bloat
-		code = code.replace(/\r?\n\r?\n$/, '');
-		parsedCodeBlocks.set(regionId, code);
-	}
+    while ((match = headerRegex.exec(sandboxText)) !== null) {
+        // Find the end of the line where this header sits
+        const lineContent = sandboxDoc.lineAt(sandboxDoc.positionAt(match.index).line);
+        headers.push({
+            id: match[1],
+            startPos: match.index,
+            endOfLinePos: sandboxDoc.offsetAt(lineContent.range.end)
+        });
+    }
 
-	// Guard: Ensure user didn't accidentally delete a separator
-	if (parsedCodeBlocks.size !== mapping.regions.length) {
-		vscode.window.showErrorMessage("Live Sync Error: A ✂️ separator was deleted. Undo your last action to restore it.");
-		return;
-	}
+    // 2. Extract code blocks between headers
+    for (let i = 0; i < headers.length; i++) {
+        const current = headers[i];
+        const next = headers[i + 1];
 
-	const originalUri = vscode.Uri.parse(mapping.originalUri);
-	const originalDoc = await vscode.workspace.openTextDocument(originalUri);
-	const edit = new vscode.WorkspaceEdit();
+        // The code starts after the current header's line and ends before the next header starts
+        const blockStart = current.endOfLinePos;
+        const blockEnd = next ? next.startPos : sandboxText.length;
 
-	// Build the bulk edit using CURRENT ranges
-	for (const region of mapping.regions) {
-		const newCode = parsedCodeBlocks.get(region.id)!;
-		const endLine = Math.min(region.originalRange.endLine, originalDoc.lineCount - 1);
-		const replaceRange = new vscode.Range(region.originalRange.startLine, 0, endLine, originalDoc.lineAt(endLine).text.length);
-		edit.replace(originalUri, replaceRange, newCode);
-	}
+        let code = sandboxText.substring(blockStart, blockEnd).trim();
+        
+        // Ensure we don't accidentally leave trailing newlines that bloat the file
+        parsedCodeBlocks.set(current.id, code);
+    }
 
-	const applied = await vscode.workspace.applyEdit(edit);
-	if (!applied) return;
+    // 3. Guard: Check if a region was deleted
+    if (parsedCodeBlocks.size !== mapping.regions.length) {
+        vscode.window.showErrorMessage("Live Sync Error: A region marker was deleted or corrupted.");
+        return;
+    }
 
-	await originalDoc.save();
+    // 4. Apply the Edits to the Original File
+    const originalUri = vscode.Uri.parse(mapping.originalUri);
+    const originalDoc = await vscode.workspace.openTextDocument(originalUri);
+    const edit = new vscode.WorkspaceEdit();
 
-	// ---------------------------------------------------
-	// THE SHIFT CALCULUS: Update line numbers for NEXT time
-	// ---------------------------------------------------
-	let currentShift = 0;
-	for (const region of mapping.regions) {
-		const newCode = parsedCodeBlocks.get(region.id)!;
-		const newCodeLineCount = newCode.split(/\r?\n/).length;
-		const oldLineCount = (region.originalRange.endLine - region.originalRange.startLine) + 1;
+    for (const region of mapping.regions) {
+        const newCode = parsedCodeBlocks.get(region.id);
+        if (newCode === undefined) continue;
 
-		// Apply any cumulative shifts from regions above this one
-		region.originalRange.startLine += currentShift;
-		region.originalRange.endLine = region.originalRange.startLine + newCodeLineCount - 1;
+        const endLine = Math.min(region.originalRange.endLine, originalDoc.lineCount - 1);
+        const replaceRange = new vscode.Range(
+            region.originalRange.startLine, 0, 
+            endLine, originalDoc.lineAt(endLine).text.length
+        );
+        
+        edit.replace(originalUri, replaceRange, newCode);
+    }
 
-		// Calculate the difference this specific region caused to pass down the chain
-		currentShift += (newCodeLineCount - oldLineCount);
-	}
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (!applied) return;
+
+    // Optional: Save original file automatically if sync is live
+    await originalDoc.save();
+
+    // 5. Update the "Shift Calculus" (The Line Number Math)
+    let currentShift = 0;
+    for (const region of mapping.regions) {
+        const newCode = parsedCodeBlocks.get(region.id)!;
+        const newCodeLineCount = newCode.split(/\r?\n/).length;
+        const oldLineCount = (region.originalRange.endLine - region.originalRange.startLine) + 1;
+
+        region.originalRange.startLine += currentShift;
+        region.originalRange.endLine = region.originalRange.startLine + newCodeLineCount - 1;
+
+        currentShift += (newCodeLineCount - oldLineCount);
+    }
 }
+
+
 
 // Helper: Find exact symbol boundary (UPGRADED for Functions/Classes)
 function findSymbolAtLine(symbols: vscode.DocumentSymbol[], targetLine: number): vscode.DocumentSymbol | undefined {
